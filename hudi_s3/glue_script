@@ -1,0 +1,93 @@
+import sys
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from awsglue.utils import getResolvedOptions
+from pyspark import SparkContext, SparkConf
+from pyspark.sql import SparkSession
+
+# from engine.glue.glue_utils import Runner, ConfigReader
+
+
+# Properties needed for correct Hudi integration
+sparkConf = SparkConf().setAppName("DHGlueJob")\
+                    .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")\
+                    .set("spark.sql.hive.convertMetastoreParquet", "false")
+glueContext = GlueContext(SparkContext.getOrCreate(sparkConf))
+
+
+
+## @params: [JOB_NAME]
+args = getResolvedOptions(sys.argv, ['JOB_NAME'])
+
+# sc = SparkContext()
+# glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+job.commit()
+
+
+
+
+
+# from pyspark.sql import SparkSession
+
+# spark = SparkSession.builder\
+#     .config('spark.serializer','org.apache.spark.serializer.KryoSerializer') \
+#     .config('className', 'org.apache.hudi') \
+#     .config('spark.sql.hive.convertMetastoreParquet', 'false') \
+#     .config('spark.sql.extensions', 'org.apache.spark.sql.hudi.HoodieSparkSessionExtension') \
+#     .getOrCreate()
+
+bucket_name = "dee-database"
+# bucket_prefix = ""
+database_name = "hudi_df"
+table_name = "product_cow"
+# table_prefix = f"{database_name}/{table_name}"
+table_location = 's3://dee-hudi/dee-table-path/'
+
+from pyspark.sql import Row
+import time
+
+ut = time.time()
+
+
+product = [
+    {'product_id': '00001', 'product_name': 'Heater', 'price': 250, 'category': 'Electronics', 'updated_at': ut},
+    {'product_id': '00002', 'product_name': 'Thermostat', 'price': 400, 'category': 'Electronics', 'updated_at': ut},
+    {'product_id': '00003', 'product_name': 'Television', 'price': 600, 'category': 'Electronics', 'updated_at': ut},
+    {'product_id': '00004', 'product_name': 'Blender', 'price': 100, 'category': 'Electronics', 'updated_at': ut},
+    {'product_id': '00005', 'product_name': 'USB charger', 'price': 50, 'category': 'Electronics', 'updated_at': ut}
+]
+
+df_products = spark.createDataFrame(Row(**x) for x in product)
+
+
+
+
+hudi_options = {
+    'hoodie.table.name': table_name,
+    'hoodie.datasource.write.storage.type': 'COPY_ON_WRITE',
+    'hoodie.datasource.write.recordkey.field': 'product_id',
+    'hoodie.datasource.write.partitionpath.field': 'category',
+    'hoodie.datasource.write.table.name': table_name,
+    'hoodie.datasource.write.operation': 'upsert',
+    'hoodie.datasource.write.precombine.field': 'updated_at',
+    'hoodie.datasource.write.hive_style_partitioning': 'true',
+    'hoodie.upsert.shuffle.parallelism': 2,
+    'hoodie.insert.shuffle.parallelism': 2,
+    'path': table_location,
+    'hoodie.datasource.hive_sync.enable': 'true',
+    'hoodie.datasource.hive_sync.database': database_name,
+    'hoodie.datasource.hive_sync.table': table_name,
+    'hoodie.datasource.hive_sync.partition_fields': 'category',
+    'hoodie.datasource.hive_sync.partition_extractor_class': 'org.apache.hudi.hive.MultiPartKeysValueExtractor',
+    'hoodie.datasource.hive_sync.use_jdbc': 'false',
+    'hoodie.datasource.hive_sync.mode': 'hms'
+}
+
+df_products.write.format("hudi")  \
+    .options(**hudi_options)  \
+    .mode("overwrite")  \
+    .save()
+	
